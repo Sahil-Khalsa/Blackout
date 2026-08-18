@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest"]
+cloud = ["openai"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["blackout_core", "blackout_chaos"]

@@ -16,11 +16,14 @@ The full design rationale — including the reasoning behind every field on the 
 ## Commands
 
 ```
-pip install -e ".[dev]"          # editable install; required before imports/tests resolve
+pip install -e ".[dev,cloud]"    # editable install; cloud extra pulls in openai (tier-1 backend)
 python scripts/smoke.py          # manual end-to-end smoke test of policy engine + journal
-pytest                           # test suite (tests/ — no tests written yet)
-pytest tests/test_x.py::test_y   # single test, once tests exist
+pytest                           # full suite (~20s; dominated by the live Ollama integration test)
+pytest -k "not ollama_integration"   # skip the live-model test explicitly
+pytest tests/test_x.py::test_y   # single test
 ```
+
+Tier-2 tests require Ollama running locally with `qwen2.5:1.5b` pulled (`ollama pull qwen2.5:1.5b`); they self-skip if `localhost:11434` isn't reachable. Tier-1 tests are mocked and need no API key.
 
 ## Architecture
 
@@ -57,6 +60,22 @@ Two conventions span the whole module and are easy to violate accidentally when 
 
 `Intent.id` is a ULID (`_ulid()`), not a UUID4, so sorting by `id` sorts by creation time — replay ordering is free.
 
+### Model router (`blackout_core/router.py`, `schema.py`, `loop.py`, `backends/`)
+
+`ModelRouter.propose(tier, task)` dispatches to a `ModelBackend` by tier and hands it exactly `registry.available_at(tier)` — the offered set, not the full registry. That line is the entire authority boundary at tier 2: a tool the tier isn't allowed to call is structurally absent from the schema, not merely filtered from the result. `tests/test_schema.py` asserts this mechanically; don't weaken it to a post-hoc filter when adding tools or backends.
+
+Like `PolicyEngine.evaluate`, `ModelRouter._backend_for` checks `Tier.JOURNAL_DOWN` by identity, never by numeric comparison — the same tier-0 trap applies here (see Tiers section above). At `JOURNAL_DOWN` no model backend is invoked at all; it always routes to `rules`.
+
+Backend contract (`ModelBackend` protocol): `propose(tools, tier, task) -> ToolCall | None`, raising `BackendUnavailable` (unreachable/network/auth) or `StructuralFailure` (bad JSON, tool name outside the offered set) rather than returning a degraded result. `AgentLoop.step` catches both and feeds them back into `TierResolver` — `BackendUnavailable` records a failed probe, `StructuralFailure` at tier 2 marks the local model unavailable so the resolver falls through to tier 3. This is the runtime version of §2.9's stated fallback: never retry a broken constrained decode with unconstrained output.
+
+Three backends: `RulesBackend` (tier 3, deterministic substring match, stdlib, also used in tests as a fast stand-in for tiers 1/2), `backends/ollama_backend.py::OllamaBackend` (tier 2, JSON-Schema-constrained generation via Ollama's `format` field — empirically verified to enforce a `oneOf`/`const` discriminated union, see STATUS.md), `backends/openai_backend.py::OpenAIBackend` (tier 1, native OpenAI tool-calling, *not* schema-constrained the same way — an out-of-set tool name is caught as a runtime `StructuralFailure`, not prevented structurally). The two concrete backends are never imported by `blackout_core/__init__.py` or `backends/__init__.py`, so importing `blackout_core` — and running the chaos harness — needs neither `openai` installed nor any credentials. Import the specific backend module to use one.
+
+Per-tool argument schemas are derived from the tool function's type annotations (`schema.py::args_schema_for`; str/int/float/bool only), not stored on `ToolPolicy` — a tool registered without full annotations fails loudly at schema-build time.
+
+`AgentLoop` does not fetch preconditions itself (no read cache yet — see STATUS.md); `DEFER` only works for tools whose preconditions the caller passes into `step()` directly.
+
 ### Known gap between design doc and implementation
 
 `docs/blackout-design.md` §4 names Pydantic as the policy-schema library; the actual implementation uses stdlib `dataclasses` (`@dataclass(frozen=True, slots=True)`) throughout `policy.py` and `journal.py`, and there is no pydantic dependency in `pyproject.toml`. Follow the code, not that line of the doc, unless asked to migrate.
+
+The tier-1 cloud backend is OpenAI (`backends/openai_backend.py`), not Anthropic — a deliberate choice, not an oversight. Doesn't affect the architecture, just the concrete SDK/exception types if extending it.
