@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "blackout"
+version = "0.1.0"
+description = "An authority runtime for agents that lose connectivity, and the harness that proves it works."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["blackout_core", "blackout_chaos"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
