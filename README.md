@@ -2,29 +2,41 @@
 
 An authority runtime for agents that lose connectivity, and the harness that proves it works.
 
-Full design and rationale: [`docs/blackout-design.md`](docs/blackout-design.md).
+Full design and rationale: [`docs/blackout-design.md`](docs/blackout-design.md). Current
+implementation status, component by component: [`STATUS.md`](STATUS.md).
 
 ## Layout
 
 ```
-blackout_core/   tiered capability runtime, policy engine, intent journal
-blackout_chaos/  network partition fault injection and behavioral scoring (not yet implemented)
-scripts/         manual verification scripts (smoke.py)
-tests/           pytest suite
-docs/            design doc
+blackout_core/            tiered capability runtime, policy engine, intent journal, model router
+blackout_core/backends/   concrete tier-1 (OpenAI) and tier-2 (Ollama) model backends
+blackout_chaos/           network partition fault injection and behavioral scoring (not yet implemented)
+scripts/                  manual verification scripts (smoke.py)
+tests/                    pytest suite
+docs/                     design doc
 ```
 
 ## Status
 
-Week 1 of the build plan (docs/blackout-design.md §5): tool registry, policy engine, and
-tier resolver are implemented in `blackout_core`. Intent journal (§2.5-2.11) is implemented.
-`blackout_chaos`, the reconciler, the model router, and the approval-surface CLI are not yet
-built.
+Week 1 of the build plan (`docs/blackout-design.md` §5) is done: tool registry, policy engine,
+tier resolver, intent journal, model router (tier-1 OpenAI native tool-calling, tier-2 Ollama
+JSON-schema-constrained generation, tier-3 deterministic rules), and a minimal agent loop.
+
+Ollama's schema constraint was verified live to structurally exclude tools outside the offered
+set — a tool a tier isn't authorized for is absent from the compiled schema, not just discouraged.
+See `STATUS.md` for the full write-up.
+
+Not yet built: `blackout_chaos`, the read cache, loop checkpointing, the reconciler, and the
+approval-surface CLI.
 
 ## Setup
 
 ```
-pip install -e ".[dev]"
+pip install -e ".[dev,cloud]"
 python scripts/smoke.py
 pytest
 ```
+
+Tier-2 tests need Ollama running locally with `qwen2.5:1.5b` pulled; they skip automatically if
+`localhost:11434` isn't reachable. Tier-1 tests are mocked and need no API key. To use a real
+cloud backend, copy `.env.example` to `.env` and set `OPENAI_API_KEY` (never commit `.env`).
