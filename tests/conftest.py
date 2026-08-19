@@ -19,6 +19,7 @@ def registry() -> ToolRegistry:
             1: "Read the current inventory level for a SKU.",
             2: "Check stock.",
         },
+        cache_key=lambda a: f"inventory:{a['sku']}",
     )
     def read_inventory(sku: str) -> dict:
         return {"sku": sku, "level": 4}

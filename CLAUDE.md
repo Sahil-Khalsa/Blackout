@@ -18,7 +18,7 @@ The full design rationale — including the reasoning behind every field on the 
 ```
 pip install -e ".[dev,cloud]"    # editable install; cloud extra pulls in openai (tier-1 backend)
 python scripts/smoke.py          # manual end-to-end smoke test of policy engine + journal
-pytest                           # full suite (~20s; dominated by the live Ollama integration test)
+pytest                           # full suite (22 tests, seconds; slower if Ollama is reachable and its live test runs)
 pytest -k "not ollama_integration"   # skip the live-model test explicitly
 pytest tests/test_x.py::test_y   # single test
 ```
@@ -72,7 +72,11 @@ Three backends: `RulesBackend` (tier 3, deterministic substring match, stdlib, a
 
 Per-tool argument schemas are derived from the tool function's type annotations (`schema.py::args_schema_for`; str/int/float/bool only), not stored on `ToolPolicy` — a tool registered without full annotations fails loudly at schema-build time.
 
-`AgentLoop` does not fetch preconditions itself (no read cache yet — see STATUS.md); `DEFER` only works for tools whose preconditions the caller passes into `step()` directly.
+### Read cache (`blackout_core/read_cache.py`)
+
+`ReadCache` is an in-memory, process-scoped `dict[str, CachedRead]`; `PreconditionRegistry` maps a named precondition to a `cache_key(args)` function and a `predicate(value)` function, both derived from the *calling tool's* args, and evaluates them into `PreconditionValue`s the same shape `PolicyEngine` already expects from a caller. A `ToolPolicy` may declare `cache_key` (only valid for `effect=READ`); when `AgentLoop.step()` executes such a tool it writes the result into the configured `ReadCache`, and for any proposal whose tool declares `preconditions`, it now auto-evaluates them from the cache when the caller didn't supply any explicitly — so `DEFER` no longer requires the caller to hand-supply preconditions.
+
+Staleness (`CachedRead.age_s`) is computed from `time.monotonic_ns()`, not wall clock, despite §2.7's literal phrasing — consistent with the journal's monotonic-only rule above, because staleness is exactly the kind of elapsed-time logic that *branches* (REFUSE vs DEFER) and so may not trust a clock that can drift offline. `CachedRead` also carries a `boot_id` (inert today since the cache doesn't persist across restarts) so a persisted entry from a prior boot can't later report a bogus-fresh age.
 
 ### Known gap between design doc and implementation
 

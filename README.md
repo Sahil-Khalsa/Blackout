@@ -24,10 +24,13 @@ JSON-schema-constrained generation, tier-3 deterministic rules), and a minimal a
 
 Ollama's schema constraint was verified live to structurally exclude tools outside the offered
 set — a tool a tier isn't authorized for is absent from the compiled schema, not just discouraged.
-See `STATUS.md` for the full write-up.
 
-Not yet built: `blackout_chaos`, the read cache, loop checkpointing, the reconciler, and the
-approval-surface CLI.
+Week 2 is underway: a read cache now backs the agent loop, so a deferred write's preconditions
+come from genuine cached reads with real staleness tracking, not caller-injected test data — the
+loop produces a real `DEFER` when the evidence is fresh and correctly `REFUSE`s instead when it's
+too stale to responsibly queue. See `STATUS.md` for the full write-up.
+
+Not yet built: `blackout_chaos`, loop checkpointing, the reconciler, and the approval-surface CLI.
 
 ## Setup
 

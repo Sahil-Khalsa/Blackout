@@ -21,6 +21,7 @@ from .policy import (
     ToolPolicy,
     ToolRegistry,
 )
+from .read_cache import CachedRead, Precondition, PreconditionRegistry, ReadCache
 from .router import (
     BackendUnavailable,
     ModelBackend,
@@ -35,6 +36,7 @@ from .schema import args_schema_for, flat_tool_call_schema, tool_call_schema
 __all__ = [
     "AgentLoop",
     "BackendUnavailable",
+    "CachedRead",
     "Decision",
     "Effect",
     "Intent",
@@ -46,7 +48,10 @@ __all__ = [
     "OfflinePolicy",
     "PolicyEngine",
     "PolicyResult",
+    "Precondition",
+    "PreconditionRegistry",
     "PreconditionValue",
+    "ReadCache",
     "RegisteredTool",
     "Rule",
     "RulesBackend",

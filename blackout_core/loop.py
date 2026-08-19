@@ -1,10 +1,12 @@
-"""Minimal agent loop: wires the tier resolver, model router, and policy
-engine into a single step function.
+"""Minimal agent loop: wires the tier resolver, model router, policy engine,
+and read cache into a single step function.
 
-Deliberately thin, and it does not fetch preconditions itself -- that's the
-read cache's job (docs/blackout-design.md §2.7, not yet built, see
-STATUS.md) -- so DEFER only works for tools whose preconditions the caller
-supplies up front. Execution and refusal work fully today regardless.
+If a read_cache and preconditions registry are configured, the loop fetches
+a proposed tool's declared preconditions itself (docs/blackout-design.md
+§2.7) whenever the caller doesn't supply them explicitly, and any tool with
+a `cache_key` that executes as a READ populates the cache for later
+precondition lookups. Without them, DEFER still works, but only for tools
+whose preconditions the caller supplies up front.
 
 Backend failures feed back into tier resolution per §2.9's stated fallback:
 an unreachable backend is a failed probe (demote, don't hang); a structural
@@ -20,6 +22,7 @@ from dataclasses import dataclass
 
 from .journal import Intent, IntentJournal, JournalUnavailable
 from .policy import Decision, PolicyEngine, PolicyResult, PreconditionValue, Tier, TierResolver
+from .read_cache import PreconditionRegistry, ReadCache
 from .router import BackendUnavailable, ModelRouter, StructuralFailure, ToolCall
 
 
@@ -41,11 +44,15 @@ class AgentLoop:
         router: ModelRouter,
         policy: PolicyEngine,
         journal: IntentJournal | None = None,
+        read_cache: ReadCache | None = None,
+        preconditions: PreconditionRegistry | None = None,
     ) -> None:
         self.tier_resolver = tier_resolver
         self.router = router
         self.policy = policy
         self.journal = journal
+        self.read_cache = read_cache
+        self.preconditions = preconditions
 
     def step(
         self,
@@ -69,17 +76,22 @@ class AgentLoop:
         if proposal is None:
             return StepResult(tier=tier, task=task, proposal=None, decision=None)
 
+        tool_policy = self.router.registry.policy(proposal.tool)
+        if not preconditions and self.preconditions is not None and tool_policy.preconditions:
+            preconditions = self.preconditions.evaluate_many(tool_policy.preconditions, proposal.args)
+
         decision = self.policy.evaluate(proposal.tool, tier, proposal.args, preconditions)
 
         if decision.decision is Decision.EXECUTE:
             fn = self.router.registry.get(proposal.tool).fn
             result = fn(**proposal.args)
+            if self.read_cache is not None and tool_policy.cache_key is not None:
+                self.read_cache.put(tool_policy.cache_key(proposal.args), result)
             return StepResult(tier=tier, task=task, proposal=proposal, decision=decision, result=result)
 
         if decision.decision is Decision.DEFER:
             if self.journal is None:
                 raise RuntimeError("policy deferred but no journal is configured")
-            tool_policy = self.router.registry.policy(proposal.tool)
             idem = (
                 tool_policy.idempotency_key(proposal.args)
                 if tool_policy.idempotency_key

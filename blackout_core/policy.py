@@ -95,6 +95,10 @@ class ToolPolicy:
     ttl_seconds: int = 3600
     reversible: bool = False
     tier_descriptions: Mapping[int, str] = field(default_factory=dict)
+    cache_key: Callable[[Mapping[str, Any]], str] | None = None
+    """Derives a read_cache.ReadCache key from this tool's args. Only valid
+    on reads -- the result of executing this tool populates the cache under
+    that key, so later preconditions can find it. See read_cache.py."""
 
     def __post_init__(self) -> None:
         if self.effect is not Effect.READ and self.idempotency_key is None:
@@ -112,6 +116,11 @@ class ToolPolicy:
                 f"tool {self.name!r} declares preconditions but no "
                 "max_precondition_staleness_s -- stale justifications must "
                 "have a defined limit"
+            )
+        if self.cache_key is not None and self.effect is not Effect.READ:
+            raise ValueError(
+                f"tool {self.name!r} declares cache_key but has effect "
+                f"{self.effect} -- only reads populate the read cache"
             )
 
     def describe_for(self, tier: Tier) -> str:

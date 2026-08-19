@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-18. Full rationale for every item lives in `docs/blackout-design.md`; this
+Last updated: 2026-08-19. Full rationale for every item lives in `docs/blackout-design.md`; this
 file tracks only what exists versus what doesn't.
 
 ## Scaffolding
@@ -23,8 +23,8 @@ Component table mirrors `docs/blackout-design.md` §2.1.
 | Tier resolver | done | `policy.py::TierResolver`, asymmetric hysteresis |
 | Intent journal | done | `journal.py::IntentJournal`, `Intent` — WAL SQLite, HMAC, monotonic TTL |
 | Model router | done (Week 1 scope) | `router.py::ModelRouter` + `schema.py` + `backends/`. See below. |
-| Minimal agent loop | done (Week 1 scope) | `loop.py::AgentLoop` |
-| Read cache | not started | §2.7 — offline reads with staleness metadata |
+| Minimal agent loop | done, now with real DEFER | `loop.py::AgentLoop`. See below. |
+| Read cache | done | `read_cache.py::ReadCache` + `PreconditionRegistry`. See below. |
 | Loop checkpoint | not started | journal has the *hooks* (`task_checkpoint_id`, `orphan_missing_checkpoints`) but nothing creates/stores a checkpoint yet |
 | Reconciler | not started | §2.6 — journal exposes the primitives one needs (`pending`, `duplicates_of`, `by_status`, `resolve`), but the reconcile algorithm itself (expire → topo-sort `depends_on` → collapse duplicates → re-evaluate preconditions → classify ready/ready_with_drift/rejected → detect conflicts) isn't written |
 | Approval surface | not started | CLI review of the batch with precondition diffs |
@@ -63,6 +63,33 @@ Component table mirrors `docs/blackout-design.md` §2.1.
   running the chaos harness against it) requires no third-party package and no credentials. Only
   explicitly importing `blackout_core.backends.openai_backend` pulls in `openai`.
 
+### Read cache detail
+
+`read_cache.py::ReadCache` — an in-memory, process-scoped `dict[str, CachedRead]`. Every entry
+carries `fetched_mono_ns` (monotonic, matching `journal.py::Intent`'s convention) and a `boot_id`.
+`PreconditionRegistry` maps a named precondition (e.g. `"inventory.below_threshold"`) to a
+`cache_key(args)` function and a `predicate(value)` function, both derived from the *tool call's*
+args — a read tool and the precondition that depends on its output must independently derive the
+same cache key from their own (different) arg dicts. `evaluate`/`evaluate_many` produce
+`PreconditionValue`s exactly like a caller-supplied one, so `PolicyEngine` doesn't know or care
+whether the evidence came from the cache or from a test double.
+
+A `ToolPolicy` can now declare `cache_key` (only valid on `effect=READ`); when `AgentLoop` executes
+such a tool, it writes the result into the configured `ReadCache` under that key.
+
+**Deviation from §2.7's literal wording:** the section says cached values carry "the wall-clock age
+of the fetch." Implemented with `time.monotonic_ns()` instead, matching the codebase-wide rule in
+§2.10 that anything which *branches* on elapsed time may not trust a clock that can drift across an
+offline session — and staleness is exactly that: it's the one thing separating a `REFUSE` from a
+`DEFER`. Not logged as a discrepancy below; read as informal phrasing for "how old the data is,"
+not a clock-source mandate, and the codebase has no wall-clock-driven branch anywhere else to be
+consistent with.
+
+`CachedRead.boot_id` is currently inert (the cache is in-memory, so every entry in a process shares
+one boot_id) but is there ahead of persistence landing — a persisted entry surviving into a new
+process would otherwise report a bogus-fresh age against the new monotonic epoch, silently turning
+a `REFUSE` into a `DEFER`.
+
 ### Agent loop detail
 
 `loop.py::AgentLoop.step()` reads the current tier from its `TierResolver`, asks the `ModelRouter`
@@ -71,15 +98,18 @@ failures feed back into tier resolution per §2.9's stated fallback: `BackendUna
 failed probe; a `StructuralFailure` from the tier-2 backend marks the local model unavailable
 (forces the resolver to tier 3) rather than retrying unconstrained.
 
-**Scope decision (deliberate):** the loop does not fetch preconditions itself — that's the read
-cache's job, not yet built. `DEFER` only works today for tools whose preconditions the caller
-supplies directly to `step()`. The Week 1 milestone (refusing a tier-1-only tool after a
-simulated network pull) doesn't need preconditions and is covered by
-`tests/test_loop.py::test_agent_refuses_page_oncall_after_network_pull`. Demonstrating
-`place_restock_order` actually deferring is Week 2 scope, once the read cache exists.
+If constructed with a `read_cache` and `preconditions` registry, `step()` now fetches a proposed
+tool's declared preconditions itself whenever the caller doesn't supply them explicitly — closing
+the gap flagged here previously. `DEFER` still also works with caller-supplied preconditions (used
+by tests that want to inject a precondition without a real cache). The Week 2 milestone —
+`place_restock_order` producing a real `DEFER` from a genuine cached precondition snapshot, and
+`REFUSE`ing instead when that evidence is stale — is covered by
+`tests/test_loop.py::test_defer_uses_precondition_from_populated_read_cache` and
+`test_defer_refuses_when_cached_precondition_is_too_stale`.
 
 Verification: `scripts/smoke.py` (manual, policy engine + journal only) plus a real `tests/` suite
-— 14 tests, `pytest` (~22s, dominated by live CPU inference in the Ollama integration test).
+— 22 tests, `pytest` (~8s without Ollama reachable; the live Ollama integration test self-skips
+when it isn't).
 
 ## `blackout_chaos`
 
@@ -96,7 +126,8 @@ outstanding.
 
 ## Next up
 
-Rest of Week 2 (§5): a minimal read cache (§2.7) so `place_restock_order` can actually defer with
-real preconditions, then loop checkpointing and the reconciler. The interactive "kill the network,
-watch the tier badge drop, restore, see the approval batch" demo (§7) is still outstanding —
-current proof is automated tests, not a live walkthrough.
+Rest of Week 2 (§5): loop checkpointing (§2.8) so a crash mid-partition produces `orphaned` intents
+instead of silent loss, then the reconciler (§2.6, expire → topo-sort → collapse duplicates →
+re-evaluate preconditions → classify → detect conflicts), then the CLI approval inbox with diffs.
+The interactive "kill the network, watch the tier badge drop, restore, see the approval batch" demo
+(§7) is still outstanding — current proof is automated tests, not a live walkthrough.
