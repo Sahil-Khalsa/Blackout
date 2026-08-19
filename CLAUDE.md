@@ -18,7 +18,7 @@ The full design rationale — including the reasoning behind every field on the 
 ```
 pip install -e ".[dev,cloud]"    # editable install; cloud extra pulls in openai (tier-1 backend)
 python scripts/smoke.py          # manual end-to-end smoke test of policy engine + journal
-pytest                           # full suite (22 tests, seconds; slower if Ollama is reachable and its live test runs)
+pytest                           # full suite (31 tests, seconds; slower if Ollama is reachable and its live test runs)
 pytest -k "not ollama_integration"   # skip the live-model test explicitly
 pytest tests/test_x.py::test_y   # single test
 ```
@@ -77,6 +77,14 @@ Per-tool argument schemas are derived from the tool function's type annotations 
 `ReadCache` is an in-memory, process-scoped `dict[str, CachedRead]`; `PreconditionRegistry` maps a named precondition to a `cache_key(args)` function and a `predicate(value)` function, both derived from the *calling tool's* args, and evaluates them into `PreconditionValue`s the same shape `PolicyEngine` already expects from a caller. A `ToolPolicy` may declare `cache_key` (only valid for `effect=READ`); when `AgentLoop.step()` executes such a tool it writes the result into the configured `ReadCache`, and for any proposal whose tool declares `preconditions`, it now auto-evaluates them from the cache when the caller didn't supply any explicitly — so `DEFER` no longer requires the caller to hand-supply preconditions.
 
 Staleness (`CachedRead.age_s`) is computed from `time.monotonic_ns()`, not wall clock, despite §2.7's literal phrasing — consistent with the journal's monotonic-only rule above, because staleness is exactly the kind of elapsed-time logic that *branches* (REFUSE vs DEFER) and so may not trust a clock that can drift offline. `CachedRead` also carries a `boot_id` (inert today since the cache doesn't persist across restarts) so a persisted entry from a prior boot can't later report a bogus-fresh age.
+
+### Loop checkpoints (`blackout_core/checkpoint.py`)
+
+`CheckpointStore` is deliberately shaped like `IntentJournal`: its own SQLite connection pointed at the *same file path* the journal uses (WAL mode allows multiple connections to one file), its own `checkpoints` table, HMAC-signed rows with the same lazy-verify-on-read pattern — but no monotonic-clock/TTL logic, since unlike intents, checkpoints don't expire.
+
+`Checkpoint` content (`task`, `reasoning_trace_id`, `completed_steps: list[dict]`, `pending_plan: dict`) is deliberately opaque and caller-driven rather than a new typed plan structure — `AgentLoop.step()` is still single-shot with no internal notion of a multi-step plan, so there was nothing concrete to type. `step()` already threads `task_checkpoint_id`/`reasoning_trace_id` through to `Intent`, so `loop.py` needed zero changes: a caller calls `store.start(...)` before a task, passes `checkpoint.id` into `step()`, and calls `record_step`/`set_pending_plan`/`complete`/`abandon` around it independently.
+
+`store.live_ids()` returns every checkpoint that loads and HMAC-verifies, regardless of status — completion doesn't erase the record. A checkpoint that fails verification (or was never written) is simply absent from that set, which is what makes `journal.orphan_missing_checkpoints(store.live_ids())` implement the doc's "missing or corrupt → orphaned" rule directly, with no separate quarantine table the way the journal's `CORRUPT` status needs one.
 
 ### Known gap between design doc and implementation
 

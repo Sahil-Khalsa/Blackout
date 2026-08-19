@@ -1,7 +1,7 @@
 # Status
 
-Last updated: 2026-08-19. Full rationale for every item lives in `docs/blackout-design.md`; this
-file tracks only what exists versus what doesn't.
+Last updated: 2026-08-19 (later same session). Full rationale for every item lives in
+`docs/blackout-design.md`; this file tracks only what exists versus what doesn't.
 
 ## Scaffolding
 
@@ -25,7 +25,7 @@ Component table mirrors `docs/blackout-design.md` §2.1.
 | Model router | done (Week 1 scope) | `router.py::ModelRouter` + `schema.py` + `backends/`. See below. |
 | Minimal agent loop | done, now with real DEFER | `loop.py::AgentLoop`. See below. |
 | Read cache | done | `read_cache.py::ReadCache` + `PreconditionRegistry`. See below. |
-| Loop checkpoint | not started | journal has the *hooks* (`task_checkpoint_id`, `orphan_missing_checkpoints`) but nothing creates/stores a checkpoint yet |
+| Loop checkpoint | done | `checkpoint.py::CheckpointStore` + `Checkpoint`. See below. |
 | Reconciler | not started | §2.6 — journal exposes the primitives one needs (`pending`, `duplicates_of`, `by_status`, `resolve`), but the reconcile algorithm itself (expire → topo-sort `depends_on` → collapse duplicates → re-evaluate preconditions → classify ready/ready_with_drift/rejected → detect conflicts) isn't written |
 | Approval surface | not started | CLI review of the batch with precondition diffs |
 | Trace buffer | not started | OpenTelemetry spans, offline-buffered |
@@ -107,8 +107,40 @@ by tests that want to inject a precondition without a real cache). The Week 2 mi
 `tests/test_loop.py::test_defer_uses_precondition_from_populated_read_cache` and
 `test_defer_refuses_when_cached_precondition_is_too_stale`.
 
+### Loop checkpoint detail
+
+`checkpoint.py::CheckpointStore` (§2.8) — its own SQLite connection pointed at the *same file path*
+`IntentJournal` uses (WAL mode supports multiple connections to one file), its own `checkpoints`
+table, HMAC-signed rows with the same lazy-verify-on-read pattern as the journal. Deliberately
+self-contained rather than reaching into `IntentJournal`'s internals — independently constructible
+and testable, same shape as `IntentJournal` itself.
+
+`Checkpoint` content is intentionally opaque/caller-driven (`task`, `reasoning_trace_id`,
+`completed_steps: list[dict]`, `pending_plan: dict`) rather than a new typed multi-step-plan
+structure — `AgentLoop.step()` is still single-shot with no internal notion of a plan, and inventing
+one wasn't needed: `step()` already threads `task_checkpoint_id`/`reasoning_trace_id` through to
+`Intent`, so a caller just calls `store.start(...)` before a task, passes `checkpoint.id` into
+`step()`, and calls `record_step`/`complete` around it. **`loop.py` did not need to change at all.**
+
+A checkpoint failing HMAC verification (or never having been written) simply isn't in
+`store.live_ids()` — which is exactly the doc's "missing or corrupt → orphaned" rule with no
+separate quarantine table needed, unlike the journal's `CORRUPT` status (there's no approval-inbox
+need yet to *see* a broken checkpoint, only to know it's not live). No monotonic-clock/TTL logic:
+checkpoints don't expire, so unlike the journal there's nothing here that branches on elapsed time —
+`created_at` is wall-clock and purely for display, with no monotonic counterpart at all.
+
+`journal.orphan_missing_checkpoints(checkpoint_store.live_ids())` is the restart-recovery call — a
+one-liner a future bootstrap/CLI invokes on startup. Proven end-to-end in
+`tests/test_checkpoint.py::test_orphan_missing_checkpoints_flags_intents_whose_checkpoint_is_missing_or_corrupt`:
+an intent referencing an intact checkpoint stays `PENDING`; one referencing a corrupted or
+never-written checkpoint becomes `ORPHANED`; one with no checkpoint at all (never had a plan to
+lose) is untouched.
+
+Built via TDD (`superpowers:test-driven-development`): every method has a test written and watched
+red before the minimal implementation went green.
+
 Verification: `scripts/smoke.py` (manual, policy engine + journal only) plus a real `tests/` suite
-— 22 tests, `pytest` (~8s without Ollama reachable; the live Ollama integration test self-skips
+— 31 tests, `pytest` (~8s without Ollama reachable; the live Ollama integration test self-skips
 when it isn't).
 
 ## `blackout_chaos`
@@ -126,8 +158,8 @@ outstanding.
 
 ## Next up
 
-Rest of Week 2 (§5): loop checkpointing (§2.8) so a crash mid-partition produces `orphaned` intents
-instead of silent loss, then the reconciler (§2.6, expire → topo-sort → collapse duplicates →
-re-evaluate preconditions → classify → detect conflicts), then the CLI approval inbox with diffs.
-The interactive "kill the network, watch the tier badge drop, restore, see the approval batch" demo
-(§7) is still outstanding — current proof is automated tests, not a live walkthrough.
+Rest of Week 2 (§5): the reconciler (§2.6 — expire → topo-sort `depends_on` → collapse duplicates by
+idempotency key → re-evaluate preconditions → classify `ready`/`ready_with_drift`/`rejected` →
+detect intra-batch conflicts), then the CLI approval inbox with precondition diffs. The interactive
+"kill the network, watch the tier badge drop, restore, see the approval batch" demo (§7) is still
+outstanding — current proof is automated tests, not a live walkthrough.

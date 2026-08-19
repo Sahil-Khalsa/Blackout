@@ -6,6 +6,7 @@ backend installed or API credentials present. Concrete cloud/local model
 backends live in blackout_core.backends and must be imported explicitly.
 """
 
+from .checkpoint import Checkpoint, CheckpointStatus, CheckpointStore
 from .journal import Intent, IntentJournal, IntentStatus, JournalUnavailable
 from .loop import AgentLoop, StepResult
 from .policy import (
@@ -37,6 +38,9 @@ __all__ = [
     "AgentLoop",
     "BackendUnavailable",
     "CachedRead",
+    "Checkpoint",
+    "CheckpointStatus",
+    "CheckpointStore",
     "Decision",
     "Effect",
     "Intent",
