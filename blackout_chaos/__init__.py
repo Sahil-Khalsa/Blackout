@@ -29,6 +29,7 @@ from .injection import (
     slow_success,
 )
 from .mock_backend import EffectRecord, MockBackendServer
+from .report import render_matrix
 
 __all__ = [
     "ChaosAgent",
@@ -51,5 +52,6 @@ __all__ = [
     "post_request_pre_response",
     "pre_plan",
     "recovery_storm",
+    "render_matrix",
     "slow_success",
 ]
