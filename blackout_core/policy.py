@@ -99,6 +99,13 @@ class ToolPolicy:
     """Derives a read_cache.ReadCache key from this tool's args. Only valid
     on reads -- the result of executing this tool populates the cache under
     that key, so later preconditions can find it. See read_cache.py."""
+    resource_key: Callable[[Mapping[str, Any]], str] | None = None
+    """Derives the identity of the thing this tool writes, coarser than
+    idempotency_key (e.g. just the SKU, not SKU+window) -- two surviving
+    intents whose tools both declare this and whose values match are an
+    intra-batch conflict (docs/blackout-design.md §2.6 step 6). Optional:
+    a tool that doesn't declare it simply never participates in conflict
+    detection. See reconciler.py."""
 
     def __post_init__(self) -> None:
         if self.effect is not Effect.READ and self.idempotency_key is None:

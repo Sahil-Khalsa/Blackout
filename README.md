@@ -30,9 +30,13 @@ come from genuine cached reads with real staleness tracking, not caller-injected
 loop produces a real `DEFER` when the evidence is fresh and correctly `REFUSE`s instead when it's
 too stale to responsibly queue. Loop checkpointing is also done: a crash mid-partition now produces
 `orphaned` intents (visible, flagged as lacking context) rather than silently replaying or silently
-losing them. See `STATUS.md` for the full write-up.
+losing them. The reconciler is done too: on reconnect it expires, topologically orders and cascades
+dependency rejections, collapses duplicate intents, re-evaluates preconditions against fresh reads
+to classify each surviving intent `ready` / `ready_with_drift` / `rejected`, detects intra-batch
+resource conflicts, and sorts the result so the shakiest justifications are reviewed first. See
+`STATUS.md` for the full write-up.
 
-Not yet built: `blackout_chaos`, the reconciler, and the approval-surface CLI.
+Not yet built: `blackout_chaos` and the approval-surface CLI.
 
 ## Setup
 

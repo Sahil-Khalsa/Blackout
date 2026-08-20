@@ -23,6 +23,7 @@ from .policy import (
     ToolRegistry,
 )
 from .read_cache import CachedRead, Precondition, PreconditionRegistry, ReadCache
+from .reconciler import ApprovalBatch, PreconditionDrift, ReadyWithDrift, reconcile
 from .router import (
     BackendUnavailable,
     ModelBackend,
@@ -36,6 +37,7 @@ from .schema import args_schema_for, flat_tool_call_schema, tool_call_schema
 
 __all__ = [
     "AgentLoop",
+    "ApprovalBatch",
     "BackendUnavailable",
     "CachedRead",
     "Checkpoint",
@@ -53,9 +55,11 @@ __all__ = [
     "PolicyEngine",
     "PolicyResult",
     "Precondition",
+    "PreconditionDrift",
     "PreconditionRegistry",
     "PreconditionValue",
     "ReadCache",
+    "ReadyWithDrift",
     "RegisteredTool",
     "Rule",
     "RulesBackend",
@@ -68,5 +72,6 @@ __all__ = [
     "ToolRegistry",
     "args_schema_for",
     "flat_tool_call_schema",
+    "reconcile",
     "tool_call_schema",
 ]

@@ -33,6 +33,7 @@ def registry() -> ToolRegistry:
         max_precondition_staleness_s=3600,
         ttl_seconds=14400,
         reversible=False,
+        resource_key=lambda a: f"sku:{a['sku']}",
     )
     def place_restock_order(sku: str, qty: int, window: str) -> None:
         return None

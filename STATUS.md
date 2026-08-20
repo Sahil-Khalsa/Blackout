@@ -26,7 +26,7 @@ Component table mirrors `docs/blackout-design.md` §2.1.
 | Minimal agent loop | done, now with real DEFER | `loop.py::AgentLoop`. See below. |
 | Read cache | done | `read_cache.py::ReadCache` + `PreconditionRegistry`. See below. |
 | Loop checkpoint | done | `checkpoint.py::CheckpointStore` + `Checkpoint`. See below. |
-| Reconciler | not started | §2.6 — journal exposes the primitives one needs (`pending`, `duplicates_of`, `by_status`, `resolve`), but the reconcile algorithm itself (expire → topo-sort `depends_on` → collapse duplicates → re-evaluate preconditions → classify ready/ready_with_drift/rejected → detect conflicts) isn't written |
+| Reconciler | done | `reconciler.py::reconcile`. See below. |
 | Approval surface | not started | CLI review of the batch with precondition diffs |
 | Trace buffer | not started | OpenTelemetry spans, offline-buffered |
 
@@ -107,6 +107,55 @@ by tests that want to inject a precondition without a real cache). The Week 2 mi
 `tests/test_loop.py::test_defer_uses_precondition_from_populated_read_cache` and
 `test_defer_refuses_when_cached_precondition_is_too_stale`.
 
+### Reconciler detail
+
+`reconciler.py::reconcile(journal, registry, preconditions, now_ns=None) -> ApprovalBatch` — the
+§2.6 seven-step algorithm, run on reconnect. `ready` and `ready_with_drift` are batch-only
+classifications, not journal statuses: those intents stay `PENDING` (they still need human approval
+via the not-yet-built CLI). `rejected`/`expired`/`collapsed`/`conflicted` are terminal outcomes
+written back via `journal.resolve()` as reconciliation proceeds — `IntentStatus` already carried
+these members unused before this component, which was the tell that the journal had been built
+anticipating it.
+
+Two ordering questions the doc leaves implicit, resolved:
+
+- **"Collapse duplicates, keep earliest" (step 4)** means earliest by ULID/creation order, not
+  position in the step-3 topological sort — dedup groups the ULID-ordered `pending()` list directly,
+  so "earliest" never depends on how dependency edges happened to reshuffle the walk.
+- **Steps 3 ("drop descendants of rejected parents") and 5 ("classify") are fused**, walked once in
+  topological order. That fusion is *why* the doc calls for a topological sort at all — a simple
+  filter over pre-existing statuses wouldn't need one. Walking parents before children means a
+  parent that goes dead earlier in this same run (rejected by step 5, or expired by step 2) is
+  already in the `dead_ids` set by the time its child is classified, so a same-run cascade works,
+  not just a cascade from a previous reconcile cycle. A dependency cycle (shouldn't happen) falls
+  back to appending the leftover nodes in original order rather than raising.
+
+Step 5 re-evaluates preconditions via the *same* `PreconditionRegistry.evaluate_many` the agent loop
+uses, against live cache state — no special-casing for "never re-fetched," since its existing
+behavior (`source_age_s=inf, satisfied=False` on a cache miss) already produces the correct
+`rejected` outcome for free. `max_precondition_staleness_s` is re-applied to the *fresh* reading at
+reconcile time too, not just at capture time — a reconnect that returns a still-stale read isn't a
+real justification either (an explicit extension of §2.7's staleness rule beyond its literal
+capture-time wording, not a discrepancy from it).
+
+Step 6 (conflict detection, "two intents writing the same resource") needed a "resource" concept
+that didn't exist anywhere in the codebase. Added `ToolPolicy.resource_key` — a pure function of
+args, optional, mirroring the existing `idempotency_key`/`cache_key` pattern exactly. A tool that
+doesn't declare it simply never participates in conflict detection; `place_restock_order` in
+`tests/conftest.py` now declares `resource_key=lambda a: f"sku:{a['sku']}"` so two restock orders
+for the same SKU but different windows (different `idempotency_key`, so not collapsed as duplicates
+in step 4) correctly conflict.
+
+Step 7 (§2.7): `ready` and `ready_with_drift` are each sorted by `Intent.max_source_age_s`
+descending — the shakiest justification surfaces first in the approval batch.
+
+Built via TDD, 12 new tests (`tests/test_reconciler.py`) covering all seven steps plus the §2.7 sort.
+Two of the twelve (expiry exclusion, and a healthy same-batch dependency staying ready) passed on
+first write without an implementation change — they exercise composition of already-correct
+primitives (`journal.pending()`'s expiry side effect; a live/ready parent never entering `dead_ids`)
+rather than driving new logic, which is expected and was left in as regression coverage rather than
+discarded.
+
 ### Loop checkpoint detail
 
 `checkpoint.py::CheckpointStore` (§2.8) — its own SQLite connection pointed at the *same file path*
@@ -140,7 +189,7 @@ Built via TDD (`superpowers:test-driven-development`): every method has a test w
 red before the minimal implementation went green.
 
 Verification: `scripts/smoke.py` (manual, policy engine + journal only) plus a real `tests/` suite
-— 31 tests, `pytest` (~8s without Ollama reachable; the live Ollama integration test self-skips
+— 43 tests, `pytest` (~9s without Ollama reachable; the live Ollama integration test self-skips
 when it isn't).
 
 ## `blackout_chaos`
@@ -158,8 +207,7 @@ outstanding.
 
 ## Next up
 
-Rest of Week 2 (§5): the reconciler (§2.6 — expire → topo-sort `depends_on` → collapse duplicates by
-idempotency key → re-evaluate preconditions → classify `ready`/`ready_with_drift`/`rejected` →
-detect intra-batch conflicts), then the CLI approval inbox with precondition diffs. The interactive
-"kill the network, watch the tier badge drop, restore, see the approval batch" demo (§7) is still
-outstanding — current proof is automated tests, not a live walkthrough.
+Last piece of Week 2 (§5): the CLI approval inbox with precondition diffs, reading `ApprovalBatch`
+from `reconciler.reconcile()`. The interactive "kill the network, watch the tier badge drop,
+restore, see the approval batch" demo (§7) is still outstanding — current proof is automated tests,
+not a live walkthrough. After that, Week 3 (`blackout_chaos`) is fully unstarted.
