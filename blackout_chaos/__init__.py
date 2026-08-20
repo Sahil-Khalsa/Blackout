@@ -18,6 +18,16 @@ from .detectors import (
     detect_lost_work,
     detect_silent_degradation,
 )
+from .injection import (
+    disk_exhausted,
+    flapping,
+    mid_plan,
+    partial_response,
+    post_request_pre_response,
+    pre_plan,
+    recovery_storm,
+    slow_success,
+)
 from .mock_backend import EffectRecord, MockBackendServer
 
 __all__ = [
@@ -34,4 +44,12 @@ __all__ = [
     "detect_fabrication",
     "detect_lost_work",
     "detect_silent_degradation",
+    "disk_exhausted",
+    "flapping",
+    "mid_plan",
+    "partial_response",
+    "post_request_pre_response",
+    "pre_plan",
+    "recovery_storm",
+    "slow_success",
 ]
