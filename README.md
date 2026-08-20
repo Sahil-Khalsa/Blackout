@@ -52,3 +52,8 @@ pytest
 Tier-2 tests need Ollama running locally with `qwen2.5:1.5b` pulled; they skip automatically if
 `localhost:11434` isn't reachable. Tier-1 tests are mocked and need no API key. To use a real
 cloud backend, copy `.env.example` to `.env` and set `OPENAI_API_KEY` (never commit `.env`).
+
+For the chaos harness (`blackout_chaos`), install the `chaos` extra
+(`pip install -e ".[dev,cloud,chaos]"`) and start Toxiproxy with
+`docker compose up -d`. Toxiproxy-dependent tests self-skip if
+`localhost:8474` isn't reachable, same convention as the Ollama tests.

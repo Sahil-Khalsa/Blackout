@@ -1,0 +1,9 @@
+services:
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    ports:
+      - "8474:8474"
+      - "20000:20000"
+      - "20001:20001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
