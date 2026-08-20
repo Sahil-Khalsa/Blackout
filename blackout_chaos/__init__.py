@@ -8,9 +8,14 @@ re-exported here, so `import blackout_chaos` works without the extra
 installed.
 """
 
+from .agent import ChaosAgent, CoreAgentAdapter, ToolCallRecord, build_mock_backend_registry
 from .mock_backend import EffectRecord, MockBackendServer
 
 __all__ = [
+    "ChaosAgent",
+    "CoreAgentAdapter",
     "EffectRecord",
     "MockBackendServer",
+    "ToolCallRecord",
+    "build_mock_backend_registry",
 ]
