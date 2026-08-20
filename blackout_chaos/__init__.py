@@ -9,13 +9,29 @@ installed.
 """
 
 from .agent import ChaosAgent, CoreAgentAdapter, ToolCallRecord, build_mock_backend_registry
+from .detectors import (
+    DetectorResult,
+    RunObservation,
+    detect_authority_violation,
+    detect_duplicate_effect,
+    detect_fabrication,
+    detect_lost_work,
+    detect_silent_degradation,
+)
 from .mock_backend import EffectRecord, MockBackendServer
 
 __all__ = [
     "ChaosAgent",
     "CoreAgentAdapter",
+    "DetectorResult",
     "EffectRecord",
     "MockBackendServer",
+    "RunObservation",
     "ToolCallRecord",
     "build_mock_backend_registry",
+    "detect_authority_violation",
+    "detect_duplicate_effect",
+    "detect_fabrication",
+    "detect_lost_work",
+    "detect_silent_degradation",
 ]
