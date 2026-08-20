@@ -238,9 +238,50 @@ without Ollama reachable; the live Ollama integration test self-skips when it is
 
 ## `blackout_chaos`
 
-Not started. Empty placeholder package. Per §3: injection points (7 fault types), scenario spec,
-5 detectors, mock backend with effect ledger, and the naive/framework baseline comparison are all
-outstanding.
+Week 3 (§3) is done. `mock_backend.py::MockBackendServer` is a threaded
+stdlib HTTP server with an undeduplicated effect ledger. `toxiproxy_client.py`
+is a thin `requests` wrapper over Toxiproxy's admin API (new `chaos` extra:
+`requests` + `pyyaml`); `docker-compose.yml` starts Toxiproxy with two fixed
+published proxy ports (20000 model, 20001 tool) alongside the admin API
+(8474). `agent.py` defines the `ChaosAgent` protocol and `CoreAgentAdapter`
+(wraps `AgentLoop`/`IntentJournal`/`TierResolver`), plus
+`build_mock_backend_registry` wiring the example tools to real HTTP calls.
+`injection.py` has all 8 fault injectors: 7 Toxiproxy toxics (§3.1) plus a
+separate tier-0 disk-exhaustion primitive Toxiproxy can't reach (§2.11) --
+resolved as 8 total, not 7 (a literal ambiguity between §3.1's table and the
+§5 milestone text). `scenario.py` loads the YAML shape from §3.2, with two
+necessary additions the doc's example omits: `warmup_task` (primes the read
+cache before the fault -- PolicyEngine checks preconditions before tier,
+unconditionally, so a cold cache REFUSEs before DEFER/EXECUTE is ever
+reached) and `seed_inventory`. `detectors.py` has all 5 pure detectors
+(fabrication, duplicate effect, silent degradation, lost work, authority
+violation) as pure functions over a `RunObservation`, unit-tested with
+hand-built fixtures and zero Docker dependency. `runner.py::run_scenario`
+wires seed -> warmup -> inject -> run_task -> snapshot -> reconcile ->
+approve -> detect. `report.py::render_matrix` renders the scenario x
+detector markdown table.
+
+`write_ack_lost` (§3.2's example) runs end to end against real Toxiproxy: a
+real `MockBackendServer`, a real `CoreAgentAdapter`, and a genuine
+Toxiproxy-induced network failure (`tests/test_chaos_integration.py`, self-
+skips if `localhost:8474` isn't reachable). It requires priming the
+`TierResolver` to `Tier.CLOUD` (place_restock_order's `min_tier`) --
+verified empirically before this landed that `AgentLoop.step()` only
+reaches the network when tier authorizes EXECUTE, never on a DEFER. All 5
+detectors pass against `blackout_core` for this scenario, but this is a
+documented, expected blind spot, not proof of nothing:
+`AgentLoop.step()`'s EXECUTE branch has no exception handling around the
+tool call, so an ack-loss produces no `ToolCallRecord` and no journaled
+intent -- fabrication/duplicate-effect/lost-work structurally cannot fail
+here. The test's real assertions are narrower and falsifiable: exactly one
+error recorded on the adapter, exactly one ledger row the agent has no
+record of. This blind spot -- like the silent-degradation detector's
+existing §4.3 caveat -- starts mattering once a naive baseline (Week 4) is
+wired in for comparison.
+
+Out of scope for Week 3, deferred to Week 4 per the spec: naive-loop and
+framework-default baseline agents, the full 12-scenario suite, and the
+three-way comparison table (§3.5-3.6).
 
 ## Known discrepancies vs. design doc
 

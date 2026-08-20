@@ -10,7 +10,7 @@ implementation status, component by component: [`STATUS.md`](STATUS.md).
 ```
 blackout_core/            tiered capability runtime, policy engine, intent journal, model router
 blackout_core/backends/   concrete tier-1 (OpenAI) and tier-2 (Ollama) model backends
-blackout_chaos/           network partition fault injection and behavioral scoring (not yet implemented)
+blackout_chaos/           network partition fault injection and behavioral scoring
 scripts/                  manual verification scripts (smoke.py, approval_inbox.py)
 tests/                    pytest suite
 docs/                     design doc
@@ -39,7 +39,17 @@ deferred tool call, not just flips a status) — and `scripts/approval_inbox.py`
 "one ready, one drifted, one auto-rejected as stale" scenario live. See `STATUS.md` for the full
 write-up.
 
-Not yet built: `blackout_chaos` (Week 3).
+Week 3 is done: `blackout_chaos` is a working chaos harness -- a threaded
+mock backend with an undeduplicated effect ledger, 8 fault injectors (7
+Toxiproxy network toxics plus a tier-0 disk-exhaustion primitive), a YAML
+scenario runner, and 5 pure behavioral detectors (fabrication, duplicate
+effects, silent degradation, lost work, authority violations). The
+`write_ack_lost` scenario runs end to end against real Toxiproxy and a real
+`blackout_core` agent loop. See `STATUS.md` for what the resulting green
+matrix does and doesn't prove on its own.
+
+Not yet built: Week 4's naive/framework baseline agents and the three-way
+comparison matrix.
 
 ## Setup
 
