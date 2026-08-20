@@ -1,5 +1,16 @@
-"""blackout-chaos: network partition fault injection and behavioral scoring.
+"""blackout-chaos: network partition fault injection and behavioral scoring
+(docs/blackout-design.md §3).
 
-Not yet implemented. See docs/blackout-design.md section 3 for the planned
-injection points, scenario spec, detectors, and baseline-comparison harness.
+Stays import-light like blackout_core/backends/__init__.py: pieces needing
+the `chaos` extra (requests for toxiproxy_client.py, pyyaml for scenario.py
+and -- since it consumes Scenario -- runner.py) are imported explicitly, not
+re-exported here, so `import blackout_chaos` works without the extra
+installed.
 """
+
+from .mock_backend import EffectRecord, MockBackendServer
+
+__all__ = [
+    "EffectRecord",
+    "MockBackendServer",
+]
