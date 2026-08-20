@@ -27,7 +27,7 @@ Component table mirrors `docs/blackout-design.md` §2.1.
 | Read cache | done | `read_cache.py::ReadCache` + `PreconditionRegistry`. See below. |
 | Loop checkpoint | done | `checkpoint.py::CheckpointStore` + `Checkpoint`. See below. |
 | Reconciler | done | `reconciler.py::reconcile`. See below. |
-| Approval surface | not started | CLI review of the batch with precondition diffs |
+| Approval surface | done | `cli.py`. See below. |
 | Trace buffer | not started | OpenTelemetry spans, offline-buffered |
 
 ### Model router detail
@@ -156,6 +156,50 @@ primitives (`journal.pending()`'s expiry side effect; a live/ready parent never 
 rather than driving new logic, which is expected and was left in as regression coverage rather than
 discarded.
 
+### Approval surface detail
+
+`cli.py` — a minimal review surface over `reconciler.reconcile()`'s `ApprovalBatch` (§2.6 line 40,
+§7 demo step 5), split into a testable core and a thin interactive shell so the review loop can be
+driven without real stdin/stdout:
+
+- `build_inbox(journal, registry, preconditions) -> InboxView` bundles the `ApprovalBatch` with the
+  two sections the reconciler itself doesn't produce but the doc says belong in the inbox: orphaned
+  intents (§2.8 — `journal.by_status(ORPHANED)`) and corrupt records (§2.11 —
+  `journal.corrupt_records()`, genuinely unreviewable).
+- `format_inbox(view, registry) -> str` renders every section — ready / ready-with-drift (with the
+  diff) / rejected / collapsed / conflicts / orphaned / corrupt-unreviewable — tagging any intent
+  whose tool has `reversible=False` with an `IRREVERSIBLE` warning (the field exists per line 101
+  specifically to make the surface warn harder here).
+- `approve(journal, registry, intent)` **executes** the deferred tool call
+  (`registry.get(tool).fn(**args)`) and only then marks the intent `REPLAYED` — `REPLAYED` existing
+  as a terminal `IntentStatus` is what makes "approve" mean something concrete rather than just
+  flipping a label. If the tool raises, the exception propagates and the intent stays `PENDING`
+  rather than being marked replayed on a failed effect. `reject(journal, intent, note)` marks
+  `REJECTED`.
+- `run_interactive(journal, registry, preconditions, input_fn=input, output_fn=print)` is the actual
+  per-item approve/reject/skip loop, with I/O injected for testing. Only intents still awaiting a
+  human decision are prompted — ready, ready_with_drift, and orphaned (shown but flagged as lacking
+  checkpoint context); rejected/expired/collapsed/conflicted are already terminal and corrupt records
+  are never actionable, so none of those consume a response.
+
+`scripts/approval_inbox.py` is a runnable walkthrough of §7 steps 4-5: three restock intents deferred
+offline, then a simulated reconnect (via the same injectable-clock technique `test_loop.py` uses, so
+the demo doesn't need to sleep 4000 real seconds) producing exactly the batch the doc's demo script
+describes — one `ready`, one `ready_with_drift` with a visible diff, one auto-rejected as stale.
+Running it live caught a real bug before commit: `format_inbox` initially never rendered the
+rejected/collapsed/conflicts sections at all, so the "auto-rejected as stale" intent the doc's demo
+calls for was silently invisible in the inbox — fixed via a new test
+(`test_format_inbox_shows_rejected_intent_with_reason`) before shipping. It also caught a Windows
+console encoding crash (`cp1252` can't encode the `⚠` character used in the irreversible warning),
+fixed by using a plain `!!` marker instead.
+
+Built via TDD, 19 new tests (`tests/test_cli.py`). Several (the empty-inbox case, orphaned/corrupt
+surfacing in `build_inbox`, the reversible-tool negative case, exception-propagation, and three of
+the four `run_interactive` behaviors) passed on first write without an implementation change, for
+the same reason as in the reconciler: they exercise composition of already-correct primitives or
+behavior that fell out of code written for an adjacent test, not new logic — left in as regression
+coverage.
+
 ### Loop checkpoint detail
 
 `checkpoint.py::CheckpointStore` (§2.8) — its own SQLite connection pointed at the *same file path*
@@ -188,9 +232,9 @@ lose) is untouched.
 Built via TDD (`superpowers:test-driven-development`): every method has a test written and watched
 red before the minimal implementation went green.
 
-Verification: `scripts/smoke.py` (manual, policy engine + journal only) plus a real `tests/` suite
-— 43 tests, `pytest` (~9s without Ollama reachable; the live Ollama integration test self-skips
-when it isn't).
+Verification: `scripts/smoke.py` (manual, policy engine + journal only), `scripts/approval_inbox.py`
+(manual, live approval-inbox walkthrough), plus a real `tests/` suite — 62 tests, `pytest` (~12s
+without Ollama reachable; the live Ollama integration test self-skips when it isn't).
 
 ## `blackout_chaos`
 
@@ -207,7 +251,9 @@ outstanding.
 
 ## Next up
 
-Last piece of Week 2 (§5): the CLI approval inbox with precondition diffs, reading `ApprovalBatch`
-from `reconciler.reconcile()`. The interactive "kill the network, watch the tier badge drop,
-restore, see the approval batch" demo (§7) is still outstanding — current proof is automated tests,
-not a live walkthrough. After that, Week 3 (`blackout_chaos`) is fully unstarted.
+Week 2 (§5) is complete. `scripts/approval_inbox.py` covers §7 steps 4-5 (reconnect → approval
+batch) as a live, runnable walkthrough; steps 1-3 (agent working normally, network kill, tier-drop
+disclosure) aren't wired into one end-to-end demo yet — that would mean composing `AgentLoop` +
+`TierResolver` + this script into a single script, still outstanding. Week 3 (`blackout_chaos`, §3)
+is fully unstarted: injection points, scenario spec, five detectors, mock backend with effect
+ledger, and the naive/framework baseline comparison.

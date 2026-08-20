@@ -11,7 +11,7 @@ implementation status, component by component: [`STATUS.md`](STATUS.md).
 blackout_core/            tiered capability runtime, policy engine, intent journal, model router
 blackout_core/backends/   concrete tier-1 (OpenAI) and tier-2 (Ollama) model backends
 blackout_chaos/           network partition fault injection and behavioral scoring (not yet implemented)
-scripts/                  manual verification scripts (smoke.py)
+scripts/                  manual verification scripts (smoke.py, approval_inbox.py)
 tests/                    pytest suite
 docs/                     design doc
 ```
@@ -25,18 +25,21 @@ JSON-schema-constrained generation, tier-3 deterministic rules), and a minimal a
 Ollama's schema constraint was verified live to structurally exclude tools outside the offered
 set — a tool a tier isn't authorized for is absent from the compiled schema, not just discouraged.
 
-Week 2 is underway: a read cache now backs the agent loop, so a deferred write's preconditions
-come from genuine cached reads with real staleness tracking, not caller-injected test data — the
-loop produces a real `DEFER` when the evidence is fresh and correctly `REFUSE`s instead when it's
-too stale to responsibly queue. Loop checkpointing is also done: a crash mid-partition now produces
-`orphaned` intents (visible, flagged as lacking context) rather than silently replaying or silently
-losing them. The reconciler is done too: on reconnect it expires, topologically orders and cascades
-dependency rejections, collapses duplicate intents, re-evaluates preconditions against fresh reads
-to classify each surviving intent `ready` / `ready_with_drift` / `rejected`, detects intra-batch
-resource conflicts, and sorts the result so the shakiest justifications are reviewed first. See
-`STATUS.md` for the full write-up.
+Week 2 is done: a read cache backs the agent loop, so a deferred write's preconditions come from
+genuine cached reads with real staleness tracking, not caller-injected test data — the loop produces
+a real `DEFER` when the evidence is fresh and correctly `REFUSE`s instead when it's too stale to
+responsibly queue. Loop checkpointing means a crash mid-partition now produces `orphaned` intents
+(visible, flagged as lacking context) rather than silently replaying or silently losing them. The
+reconciler expires, topologically orders and cascades dependency rejections, collapses duplicate
+intents, re-evaluates preconditions against fresh reads to classify each surviving intent `ready` /
+`ready_with_drift` / `rejected`, detects intra-batch resource conflicts, and sorts the result so the
+shakiest justifications are reviewed first. The approval-surface CLI reviews that batch — with
+precondition diffs, an irreversible-action warning, and an actual approve action (it executes the
+deferred tool call, not just flips a status) — and `scripts/approval_inbox.py` runs the §7 demo's
+"one ready, one drifted, one auto-rejected as stale" scenario live. See `STATUS.md` for the full
+write-up.
 
-Not yet built: `blackout_chaos` and the approval-surface CLI.
+Not yet built: `blackout_chaos` (Week 3).
 
 ## Setup
 
