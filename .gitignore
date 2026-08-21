@@ -15,7 +15,10 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-.claude/settings.local.json
+CLAUDE.md
+.claude/
+.agents/
+skills-lock.json
 
 .env
 .env.*
